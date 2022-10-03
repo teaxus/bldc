@@ -207,8 +207,8 @@ all_fw:        $(addsuffix _vescfw, $(FW_TARGETS))
 all_fw_clean:  $(addsuffix _clean,  $(FW_TARGETS))
 
 # Expand the firmware rules
+# !!! 就是在这个地方生成说有主板的目标以供make  !!!
 $(foreach board, $(ALL_BOARD_NAMES), $(eval $(call FW_TEMPLATE,$(board),$(BUILD_DIR)/$(board),$(board),$(GIT_BRANCH_NAME),$(GIT_COMMIT_HASH)$(GIT_DIRTY_LABEL),$(ARM_GCC_VERSION))))
-
 
 ##############################
 #
