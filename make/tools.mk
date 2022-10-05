@@ -11,7 +11,9 @@
 ####################
 # ARM (Cortex) SDK #
 ####################
-ARM_SDK_DIR := $(TOOLS_DIR)/gcc-arm-none-eabi-7-2018-q2-update
+# ARM_SDK_DIR := $(TOOLS_DIR)/gcc-arm-none-eabi-7-2018-q2-update
+ARM_SDK_DIR := $(HOME)/HardWare/arm-gnu-toolchain/gcc-arm-none-eabi-7-2018-q2-update
+# ARM_SDK_DIR := $(HOME)/HardWare/arm-gnu-toolchain/arm-gnu-toolchain-12
 
 .PHONY: arm_sdk_install
 ifdef LINUX

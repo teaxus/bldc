@@ -3,6 +3,7 @@
 # NOTE: Can be overridden externally.
 #
 
+# 这个控制是否使用LISP BM
 USE_LISPBM=1
 
 # Compiler options here.
