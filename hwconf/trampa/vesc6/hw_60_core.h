@@ -32,6 +32,8 @@
 #else
 #define HW_NAME					"60_MK6"
 #endif
+#elif defined(HW60_IS_TS)
+#define HW_NAME					"60_TS"
 #elif defined(HW60_IS_MK1)
 #define HW_NAME					"60"
 #else
@@ -353,38 +355,50 @@
 #endif
 
 
+#if defined(HW60_IS_TS)
+// MPU9250 ---- Begin
 
-// 统一使用 I2C的MPU9250
-#define MPU9X50_SDA_GPIO		GPIOB
-#define MPU9X50_SDA_PIN			2
-#define MPU9X50_SCL_GPIO		GPIOB
-#define MPU9X50_SCL_PIN			15
-#define IMU_FLIP
-// #if !defined(HW60_IS_MK4) && !defined(HW60_IS_MK5) && !defined(HW60_IS_MK6)
 // #define MPU9X50_SDA_GPIO		GPIOB
 // #define MPU9X50_SDA_PIN			2
-// #define MPU9X50_SCL_GPIO		GPIOA
+// #define MPU9X50_SCL_GPIO		GPIOB
 // #define MPU9X50_SCL_PIN			15
 // #define IMU_FLIP
-// #elif defined(HW60_IS_MK6)
-// #define BMI160_SPI_PORT_NSS		GPIOA
-// #define BMI160_SPI_PIN_NSS		15
-// #define BMI160_SPI_PORT_SCK		GPIOC
-// #define BMI160_SPI_PIN_SCK		15
-// #define BMI160_SPI_PORT_MOSI	GPIOB
-// #define BMI160_SPI_PIN_MOSI		2
-// #define BMI160_SPI_PORT_MISO	GPIOB
-// #define BMI160_SPI_PIN_MISO		12
-// #define IMU_FLIP
-// #define IMU_ROT_180
-// #else
-// #define BMI160_SDA_GPIO			GPIOB
-// #define BMI160_SDA_PIN			2
-// #define BMI160_SCL_GPIO			GPIOA
-// #define BMI160_SCL_PIN			15
-// #define IMU_FLIP
-// #define IMU_ROT_180
-// #endif
+
+// MPU9250 ---- Begin
+
+#define BMI160_SDA_GPIO			GPIOA
+#define BMI160_SDA_PIN			15
+#define BMI160_SCL_GPIO			GPIOB
+#define BMI160_SCL_PIN			2
+#define IMU_FLIP
+#define IMU_ROT_180
+
+
+#elif !defined(HW60_IS_MK4) && !defined(HW60_IS_MK5) && !defined(HW60_IS_MK6)
+#define MPU9X50_SDA_GPIO		GPIOB
+#define MPU9X50_SDA_PIN			2
+#define MPU9X50_SCL_GPIO		GPIOA
+#define MPU9X50_SCL_PIN			15
+#define IMU_FLIP
+#elif defined(HW60_IS_MK6)
+#define BMI160_SPI_PORT_NSS		GPIOA
+#define BMI160_SPI_PIN_NSS		15
+#define BMI160_SPI_PORT_SCK		GPIOC
+#define BMI160_SPI_PIN_SCK		15
+#define BMI160_SPI_PORT_MOSI	GPIOB
+#define BMI160_SPI_PIN_MOSI		2
+#define BMI160_SPI_PORT_MISO	GPIOB
+#define BMI160_SPI_PIN_MISO		12
+#define IMU_FLIP
+#define IMU_ROT_180
+#else
+#define BMI160_SDA_GPIO			GPIOA
+#define BMI160_SDA_PIN			15
+#define BMI160_SCL_GPIO			GPIOB
+#define BMI160_SCL_PIN			2
+#define IMU_FLIP
+#define IMU_ROT_180
+#endif
 
 #if defined(HW60_IS_MK3) || defined(HW60_IS_MK4) || defined(HW60_IS_MK5)
 // NRF SWD
