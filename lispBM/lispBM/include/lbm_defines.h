@@ -95,6 +95,12 @@
 #define SYM_TRUE          0x2
 #define SYM_DONTCARE      0x9
 
+// Apply funs:
+// get their arguments in evaluated form
+// and are in that way similar to fundamentals.
+// They are implemented as part of eval_cps as they
+// have the somewhat ambiguous property of being more
+// "coupled" to how the evaluator works.
 // Consecutive value symbols for lookup-application
 #define APPLY_FUNS_START  0x10
 #define SYM_SETVAR        0x10
@@ -109,7 +115,9 @@
 #define SYM_SEND          0x19
 #define SYM_EXIT_OK       0x1A
 #define SYM_EXIT_ERROR    0x1B
-#define APPLY_FUNS_END    0x1B
+#define SYM_MAP           0x1C
+#define SYM_REVERSE       0x1D
+#define APPLY_FUNS_END    0x1D
 
 
 
@@ -141,15 +149,6 @@
 
 #define SYM_NO_MATCH       0x40
 #define SYM_MATCH_ANY      0x41
-#define SYM_MATCH_I        0x42
-#define SYM_MATCH_U        0x43
-#define SYM_MATCH_U32      0x44
-#define SYM_MATCH_I32      0x45
-#define SYM_MATCH_FLOAT    0x46
-#define SYM_MATCH_CONS     0x47
-#define SYM_MATCH_U64      0x48
-#define SYM_MATCH_I64      0x49
-#define SYM_MATCH_DOUBLE   0x4A
 
 // Type identifying symbols
 #define SYM_TYPE_LIST      0x50
@@ -184,7 +183,11 @@
 #define SYM_TOKENIZER_RERROR 0x82
 
 
-// Built in special forms - consecutive for lookup-application
+// Built in special forms:
+// Special forms get their arguments unevaluated
+// and are free to choose to evaluate one or more
+// of them as needed.
+// Consecutive for lookup-application.
 #define SPECIAL_FORMS_START     0x100
 #define SYM_QUOTE               0x100
 #define SYM_DEFINE              0x101
@@ -201,7 +204,9 @@
 #define SYM_MACRO               0x10C
 #define SYM_CONT                0x10D
 #define SYM_CLOSURE             0x10E
-#define SPECIAL_FORMS_END       0x10E
+#define SYM_COND                0x10F
+#define SYM_APP_CONT            0x110
+#define SPECIAL_FORMS_END       0x110
 
 // Fundamental Operations
 // Consecutive values for lookup-application
@@ -243,29 +248,29 @@
 #define SYM_ACONS               0x222
 #define SYM_SET_ASSOC           0x223
 #define SYM_COSSA               0x224
-#define SYM_IS_FUNDAMENTAL      0x225
-#define SYM_IX                  0x226
-#define SYM_ENCODE_I32          0x227
-#define SYM_ENCODE_U32          0x228
-#define SYM_ENCODE_FLOAT        0x229
-#define SYM_DECODE              0x22A
-#define SYM_TO_I                0x22B
-#define SYM_TO_I32              0x22C
-#define SYM_TO_U                0x22D
-#define SYM_TO_U32              0x22E
-#define SYM_TO_FLOAT            0x22F
-#define SYM_TO_I64              0x230
-#define SYM_TO_U64              0x231
-#define SYM_TO_DOUBLE           0x232
-#define SYM_TO_BYTE             0x233
-#define SYM_SHL                 0x234
-#define SYM_SHR                 0x235
-#define SYM_BITWISE_AND         0x236
-#define SYM_BITWISE_OR          0x237
-#define SYM_BITWISE_XOR         0x238
-#define SYM_BITWISE_NOT         0x239
-#define SYM_CUSTOM_DESTRUCT     0x23A /* run the destructor of a custom type */
-#define SYM_TYPE_OF             0x23B
+#define SYM_IX                  0x225
+#define SYM_TO_I                0x226
+#define SYM_TO_I32              0x227
+#define SYM_TO_U                0x228
+#define SYM_TO_U32              0x229
+#define SYM_TO_FLOAT            0x22A
+#define SYM_TO_I64              0x22B
+#define SYM_TO_U64              0x22C
+#define SYM_TO_DOUBLE           0x22D
+#define SYM_TO_BYTE             0x22E
+#define SYM_SHL                 0x22F
+#define SYM_SHR                 0x230
+#define SYM_BITWISE_AND         0x231
+#define SYM_BITWISE_OR          0x232
+#define SYM_BITWISE_XOR         0x233
+#define SYM_BITWISE_NOT         0x234
+#define SYM_CUSTOM_DESTRUCT     0x235 /* run the destructor of a custom type */
+#define SYM_TYPE_OF             0x236
+#define SYM_LIST_LENGTH         0x237
+#define SYM_RANGE               0x238
+#define SYM_NUM_NOT_EQ          0x239
+#define SYM_NOT_EQ              0x23A
+#define SYM_REG_EVENT_HANDLER   0x23B
 #define FUNDAMENTALS_END        0x23B
 
 #define SPECIAL_SYMBOLS_START    0
@@ -309,6 +314,9 @@
 #define ENC_SYM_SETVAR      ((SYM_SETVAR << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
 #define ENC_SYM_EXIT_OK     ((SYM_EXIT_OK << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
 #define ENC_SYM_EXIT_ERROR  ((SYM_EXIT_ERROR << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
+#define ENC_SYM_COND        ((SYM_COND << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
+#define ENC_SYM_PROGN       ((SYM_PROGN << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
+#define ENC_SYM_APP_CONT    ((SYM_APP_CONT << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
 
 #define ENC_SYM_SPAWN       ((SYM_SPAWN << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
 #define ENC_SYM_YIELD       ((SYM_YIELD << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
@@ -341,6 +349,9 @@
 #define ENC_SYM_TYPE_U      ((SYM_TYPE_U << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
 #define ENC_SYM_TYPE_CHAR   ((SYM_TYPE_CHAR << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
 #define ENC_SYM_TYPE_SYMBOL ((SYM_TYPE_SYMBOL << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
+
+#define ENC_SYM_NUM_NOT_EQ  ((SYM_NUM_NOT_EQ << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
+#define ENC_SYM_NOT_EQ      ((SYM_NOT_EQ << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
 
 #define ENC_SYM_COLON       ((SYM_COLON << LBM_VAL_SHIFT) | LBM_TYPE_SYMBOL)
 

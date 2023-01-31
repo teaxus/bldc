@@ -39,6 +39,7 @@ special_sym const special_symbols[] =  {
   {"quote"      , SYM_QUOTE},
   {"t"          , SYM_TRUE},
   {"if"         , SYM_IF},
+  {"cond"       , SYM_COND},
   {"lambda"     , SYM_LAMBDA},
   {"closure"    , SYM_CLOSURE},
   {"let"        , SYM_LET},
@@ -59,19 +60,12 @@ special_sym const special_symbols[] =  {
   {"setvar"       , SYM_SETVAR},
   {"exit-ok"      , SYM_EXIT_OK},
   {"exit-error"   , SYM_EXIT_ERROR},
+  {"map"          , SYM_MAP},
+  {"reverse"      , SYM_REVERSE},
   {"gc"           , SYM_PERFORM_GC},
 
   // pattern matching
   {"?"          , SYM_MATCH_ANY},
-  {"?i"         , SYM_MATCH_I},
-  {"?u"         , SYM_MATCH_U},
-  {"?u32"       , SYM_MATCH_U32},
-  {"?i32"       , SYM_MATCH_I32},
-  {"?float"     , SYM_MATCH_FLOAT},
-  {"?cons"      , SYM_MATCH_CONS},
-  {"?u64"       , SYM_MATCH_U64},
-  {"?i64"       , SYM_MATCH_I64},
-  {"?double"    , SYM_MATCH_DOUBLE},
 
   // Error symbols with parsable names
   {"no_match"           , SYM_NO_MATCH},
@@ -112,6 +106,7 @@ special_sym const special_symbols[] =  {
   {"[openbrack]"      , SYM_OPENBRACK},
   {"[closebrack]"     , SYM_CLOSEBRACK},
   {"[rerror]"         , SYM_TOKENIZER_RERROR},
+  {"[appcont]"        , SYM_APP_CONT},
 
   // special symbols with parseable names
   {"type-list"        , SYM_TYPE_LIST},
@@ -136,6 +131,7 @@ special_sym const special_symbols[] =  {
   {"/"                , SYM_DIV},
   {"mod"              , SYM_MOD},
   {"="                , SYM_NUMEQ},
+  {"!="               , SYM_NUM_NOT_EQ},
   {"<"                , SYM_LT},
   {">"                , SYM_GT},
   {"<="               , SYM_LEQ},
@@ -153,6 +149,7 @@ special_sym const special_symbols[] =  {
   {"spawn-trap"       , SYM_SPAWN_TRAP},
   {"set-mailbox-size" , SYM_SET_MAILBOX_SIZE},
   {"eq"               , SYM_EQ},
+  {"not-eq"           , SYM_NOT_EQ},
   {"car"              , SYM_CAR},
   {"cdr"              , SYM_CDR},
   {"cons"             , SYM_CONS},
@@ -172,6 +169,8 @@ special_sym const special_symbols[] =  {
   {"setcar"           , SYM_SET_CAR},
   {"setcdr"           , SYM_SET_CDR},
   {"setix"            , SYM_SET_IX},
+  {"length"           , SYM_LIST_LENGTH},
+  {"range"            , SYM_RANGE},
 
   {"assoc"          , SYM_ASSOC}, // lookup an association
   {"cossa"          , SYM_COSSA}, // lookup an association "backwards"
@@ -197,22 +196,18 @@ special_sym const special_symbols[] =  {
   {"to-double"      , SYM_TO_DOUBLE},
   {"to-byte"        , SYM_TO_BYTE},
 
+  {"event-register-handler", SYM_REG_EVENT_HANDLER},
+
   // fast access in list
   {"ix"             , SYM_IX},
-
-  // Low-level
-  {"encode-i32"     , SYM_ENCODE_I32},
-  {"encode-u32"     , SYM_ENCODE_U32},
-  {"encode-float"   , SYM_ENCODE_FLOAT},
-  {"decode"         , SYM_DECODE},
-
-  {"is-fundamental" , SYM_IS_FUNDAMENTAL},
 
   // aliases
   {"first"          , SYM_CAR},
   {"rest"           , SYM_CDR},
   {"fn"             , SYM_LAMBDA},
-  {"def"            , SYM_DEFINE}
+  {"def"            , SYM_DEFINE},
+  {"true"           , SYM_TRUE},
+  {"false"          , SYM_NIL}
 
 };
 
@@ -223,6 +218,8 @@ static lbm_uint next_variable_symbol_id = VARIABLE_SYMBOLS_START;
 
 static lbm_uint symbol_table_size_list = 0;
 static lbm_uint symbol_table_size_strings = 0;
+
+
 
 int lbm_symrepr_init(void) {
   symlist = NULL;
@@ -290,17 +287,9 @@ int lbm_get_symbol_by_name(char *name, lbm_uint* id) {
   return 0;
 }
 
-int lbm_add_symbol(char *name, lbm_uint* id) {
-  size_t  n = 0;
-
-  n = strlen(name) + 1;
+static bool store_symbol_name(char *name, lbm_uint *res) {
+  size_t n = strlen(name) + 1;
   if (n == 1) return 0; // failure if empty symbol
-
-  lbm_uint *m = lbm_memory_allocate(3);
-
-  if (m == NULL) {
-    return 0;
-  }
 
   char *symbol_name_storage = NULL;
   lbm_uint alloc_size;
@@ -312,17 +301,23 @@ int lbm_add_symbol(char *name, lbm_uint* id) {
 
   symbol_name_storage = (char *)lbm_memory_allocate(alloc_size);
 
-  if (symbol_name_storage == NULL) {
-    lbm_memory_free(m);
-    return 0;
-  }
+  if (symbol_name_storage == NULL) return false;
 
-  symbol_table_size_list += 3;
   symbol_table_size_strings += alloc_size;
 
   strcpy(symbol_name_storage, name);
 
-  m[NAME] = (lbm_uint)symbol_name_storage;
+  *res = (lbm_uint)symbol_name_storage;
+  return true;
+}
+
+static bool add_symbol_to_symtab(lbm_uint name, lbm_uint id) {
+  lbm_uint *m = lbm_memory_allocate(3);
+
+  if (m == NULL) return false;
+
+  symbol_table_size_list += 3;
+  m[NAME] = name;
 
   if (symlist == NULL) {
     m[NEXT] = (lbm_uint) NULL;
@@ -331,8 +326,33 @@ int lbm_add_symbol(char *name, lbm_uint* id) {
     m[NEXT] = (lbm_uint) symlist;
     symlist = m;
   }
-  m[ID] = next_symbol_id++;
-  *id = m[ID];
+  m[ID] =id;
+  return true;
+}
+
+int lbm_add_symbol(char *name, lbm_uint* id) {
+
+  lbm_uint symbol_name_storage;
+  if (!store_symbol_name(name, &symbol_name_storage)) return 0;
+
+  if (!add_symbol_to_symtab(symbol_name_storage, next_symbol_id)) {
+    lbm_memory_free((lbm_uint*)symbol_name_storage);
+    return 0;
+  }
+
+  *id = next_symbol_id ++;
+
+  return 1;
+}
+
+int lbm_add_symbol_const(char *name, lbm_uint* id) {
+
+  if (!add_symbol_to_symtab((lbm_uint)name, next_symbol_id)) {
+    return 0;
+  }
+
+  *id = next_symbol_id ++;
+
   return 1;
 }
 
@@ -345,179 +365,60 @@ int lbm_str_to_symbol(char *name, lbm_uint *sym_id) {
 }
 
 int lbm_add_variable_symbol(char *name, lbm_uint* id) {
-  if (strlen(name) == 0) return 0; // failure if empty symbol
+
   if (next_variable_symbol_id >= VARIABLE_SYMBOLS_END) return 0;
-  size_t  n = 0;
+  lbm_uint symbol_name_storage;
+  if (!store_symbol_name(name, &symbol_name_storage)) return 0;
 
-  n = strlen(name) + 1;
-  if (n == 1) return 0; // failure if empty symbol
-
-  lbm_uint *m = lbm_memory_allocate(3);
-
-  if (m == NULL) {
+  if (!add_symbol_to_symtab(symbol_name_storage, next_variable_symbol_id)) {
+    lbm_memory_free((lbm_uint*)symbol_name_storage);
     return 0;
   }
 
-  char *symbol_name_storage = NULL;
-  lbm_uint alloc_size;
-  if (n % sizeof(lbm_uint) == 0) {
-    alloc_size = n/(sizeof(lbm_uint));
-  } else {
-    alloc_size = (n/(sizeof(lbm_uint))) + 1;
-  }
+  *id = next_variable_symbol_id ++;
 
-  symbol_name_storage = (char *)lbm_memory_allocate(alloc_size);
-
-  if (symbol_name_storage == NULL) {
-    lbm_memory_free(m);
-    return 0;
-  }
-
-  symbol_table_size_list += 3;
-  symbol_table_size_strings += alloc_size;
-
-  strcpy(symbol_name_storage, name);
-
-  m[NAME] = (lbm_uint)symbol_name_storage;
-
-  if (symlist == NULL) {
-    m[NEXT] = (lbm_uint) NULL;
-    symlist = m;
-  } else {
-    m[NEXT] = (lbm_uint) symlist;
-    symlist = m;
-  }
-  m[ID] = next_variable_symbol_id++;
-  *id = m[ID];
   return 1;
 }
 
 int lbm_add_variable_symbol_const(char *name, lbm_uint* id) {
-  if (strlen(name) == 0) return 0; // failure if empty symbol
+
   if (next_variable_symbol_id >= VARIABLE_SYMBOLS_END) return 0;
-  size_t  n = 0;
 
-  n = strlen(name) + 1;
-  if (n == 1) return 0; // failure if empty symbol
-
-  lbm_uint *m = lbm_memory_allocate(3);
-
-  if (m == NULL) {
+  if (!add_symbol_to_symtab((lbm_uint)name, next_variable_symbol_id)) {
     return 0;
   }
 
-  symbol_table_size_list += 3;
+  *id = next_variable_symbol_id ++;
 
-  m[NAME] = (lbm_uint)name;
-
-  if (symlist == NULL) {
-    m[NEXT] = (lbm_uint) NULL;
-    symlist = m;
-  } else {
-    m[NEXT] = (lbm_uint) symlist;
-    symlist = m;
-  }
-  m[ID] = next_variable_symbol_id++;
-  *id = m[ID];
-  return 1;
-}
-
-
-int lbm_add_symbol_const(char *name, lbm_uint* id) {
-  if (strlen(name) == 0) return 0; // failure if empty symbol
-
-  lbm_uint *m = lbm_memory_allocate(3);
-
-  if (m == NULL) {
-    return 0;
-  }
-
-  symbol_table_size_list += 3;
-
-  m[NAME] = (lbm_uint)name;
-
-  if (symlist == NULL) {
-    m[NEXT] = (lbm_uint) NULL;
-    symlist = m;
-  } else {
-    m[NEXT] = (lbm_uint) symlist;
-    symlist = m;
-  }
-  m[ID] = next_symbol_id++;
-  *id = m[ID];
   return 1;
 }
 
 int lbm_add_extension_symbol(char *name, lbm_uint* id) {
-  size_t  n = 0;
-  n = strlen(name) + 1;
 
-  if (n == 1) return 0; // failure if empty symbol
   if (next_extension_symbol_id >= EXTENSION_SYMBOLS_END) return 0;
+  lbm_uint symbol_name_storage;
+  if (!store_symbol_name(name, &symbol_name_storage)) return 0;
 
-  lbm_uint *m = lbm_memory_allocate(3);
-
-  if (m == NULL) {
+  if (!add_symbol_to_symtab(symbol_name_storage, next_extension_symbol_id)) {
+    lbm_memory_free((lbm_uint*)symbol_name_storage);
     return 0;
   }
 
-  char *symbol_name_storage = NULL;
-  lbm_uint alloc_size;
-  if (n % sizeof(lbm_uint) == 0) {
-    alloc_size = n/(sizeof(lbm_uint));
-  } else {
-    alloc_size = (n/(sizeof(lbm_uint))) + 1;
-  }
+  *id = next_extension_symbol_id ++;
 
-  symbol_name_storage = (char *)lbm_memory_allocate(alloc_size);
-
-  if (symbol_name_storage == NULL) {
-    lbm_memory_free(m);
-    return 0;
-  }
-
-  symbol_table_size_list += 3;
-  symbol_table_size_strings += alloc_size;
-
-  strcpy(symbol_name_storage, name);
-
-  m[NAME] = (lbm_uint)symbol_name_storage;
-
-  if (symlist == NULL) {
-    m[NEXT] = (lbm_uint) NULL;
-    symlist = m;
-  } else {
-    m[NEXT] = (lbm_uint) symlist;
-    symlist = m;
-  }
-  m[ID] = next_extension_symbol_id++;
-  *id = m[ID];
   return 1;
 }
 
 int lbm_add_extension_symbol_const(char *name, lbm_uint* id) {
-  if (strlen(name) == 0) return 0; // failure if empty symbol
+
   if (next_extension_symbol_id >= EXTENSION_SYMBOLS_END) return 0;
 
-  lbm_uint *m = lbm_memory_allocate(3);
-
-  if (m == NULL) {
+  if (!add_symbol_to_symtab((lbm_uint)name, next_extension_symbol_id)) {
     return 0;
   }
 
-  symbol_table_size_list += 3;
+  *id = next_extension_symbol_id ++;
 
-  m[NAME] = (lbm_uint)name;
-
-  if (symlist == NULL) {
-    m[NEXT] = (lbm_uint) NULL;
-    symlist = m;
-  } else {
-    m[NEXT] = (lbm_uint) symlist;
-    symlist = m;
-  }
-  m[ID] = next_extension_symbol_id++;
-  *id = m[ID];
   return 1;
 }
 

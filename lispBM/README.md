@@ -58,10 +58,10 @@ Reset the timeout that stops the motor. This has to be run on at least every sec
 (get-ppm)
 ```
 
-Read the decoded value on the PPM input and returns 0.0 to 1.0. Note that the PPM app has to be configured and running. Example:
+Read the decoded value on the PPM input, range -1.0 to 1.0. If the PPM-decoder is not running it will be initialized and the PPM-pin will be reconfigured, so make sure that nothing else is using that pin. Example:
 
 ```clj
-(print (list "PPM Value: " (get-ppm)))
+(print (str-from-n (get-ppm) "PPM Value: %.2f"))
 ```
 
 Note that control type can be set to Off in the PPM app to get the input without running the motor automatically, which is useful when running the motor from lisp.
@@ -81,6 +81,14 @@ Get the age of the last PPM update in seconds. Can be used to determine if there
 ```
 
 Get angle from selected encoder in degrees.
+
+#### get-encoder-error-rate
+
+```clj
+(get-encoder-error-rate)
+```
+
+Returns the error rate for the selected encoder, range 0.0 to 1.0. If the selected encoder does not provide any error rate -1.0 is returned. If the selected encoder has multiple error rates the highest one is returned.
 
 #### set-servo
 
@@ -146,13 +154,58 @@ Get value from BMS. Examples:
 (get-bms-val 'bms-msg-age) ; Age of last message from BMS in seconds
 ```
 
+#### set-bms-val
+
+```clj
+(set-bms-val val optValArg new-value)
+```
+
+This lets you set BMS-values so that VESC Tool and the BMS limits can see and use them. The same values as described in [get-bms-val](#get-bms-val) can be updated, but with an argument at the end with what the value should be set to.
+
+This is useful if you want to implement communication with a custom BMS and have it show up in VESC Tool.
+
+Example:
+
+```clj
+(set-bms-val 'bms-cell-num 12) ; It is a 12s pack
+(set-bms-val 'bms-v-cell 2 3.92) ; Set cell 2 voltage to 3.92V
+```
+
+#### send-bms-can
+
+```clj
+(send-bms-can)
+```
+
+Send BMS-values on CAN-bus. This his useful if a custom BMS-driver is implemented using [set-bms-val](#set-bms-val) in order to make devices on the CAN-bus aware of the BMS-state using the VESC protocol.
+
 #### get-adc
 
 ```clj
 (get-adc ch)
 ```
 
-Get ADC voltage on channel ch (0, 1 or 2).
+Get ADC voltage on channel ch (0, 1, 2 or 3). The channels are the following:
+
+**Channel 0:**  
+ADC1 on the COMM-port
+
+**Channel 1:**  
+ADC2 on the COMM-port
+
+**Channel 2:**  
+ADC3 on the COMM-port. Note that some hardware does not have this channel - then the voltage of ADC1 is returned instead.
+
+**Channel 3:**  
+This is the ADC-channel that the motor temperature sensor goes to. Note: if you want to use this channel for something else you have to disable the motor temperature sensor in General -> Advanced. Otherwise the input might generate overtemperature faults.
+
+#### override-temp-motor
+
+```clj
+(override-temp-motor temp)
+```
+
+Override motor temperature. This can be used to implement custom motor temperature sensors if the sensor you have is not supported. Note: Motor Temperature Sensor Type has to be set to Disabled in General -> Advanced for the override to work.
 
 #### get-adc-decoded
 
@@ -270,13 +323,14 @@ Sleep for *seconds* seconds. Example:
 Get button and joystick state of connected remote. Note that a remote app such as the VESC remote or nunchuk must be configured and running for this to work. Returns the following list:
 
 ```clj
-(js-y js-x bt-c bt-z is-rev)
+(js-y js-x bt-c bt-z is-rev update-age)
 ; Where
 ; js-y : Joystick Y axis, range -1.0 to 1.0
 ; js-x : Joystick X axis, range -1.0 to 1.0
 ; bt-c : C button pressed state, 0 or 1
 ; bt-z : Z button pressed state, 0 or 1
 ; is-rev : Reverse active, 0 or 1
+; update-age : Age of last update from the remote in seconds
 ```
 
 #### sysinfo
@@ -298,9 +352,41 @@ Read system info parameter param. Example:
 (sysinfo 'compiler) ; GCC version, e.g. 7.3.1
 ```
 
+#### stats
+
+```clj
+(stats param)
+```
+
+Get statistics about the selected motor since boot (or since stats-reset). The following example shows which stats are available:
+
+```clj
+(stats 'stat-speed-avg) ; Average speed in m/s
+(stats 'stat-speed-max) ; Maximum speed in m/s
+(stats 'stat-power-avg) ; Average power in W
+(stats 'stat-power-max) ; Maximum power in W
+(stats 'stat-current-avg) ; Average current in A
+(stats 'stat-current-max) ; Maximum current in A
+(stats 'stat-temp-mosfet-avg) ; Average MOSFET temp in degC
+(stats 'stat-temp-mosfet-max) ; Maximum MOSFET temp in degC
+(stats 'stat-temp-motor-avg) ; Average motor temp in degC
+(stats 'stat-temp-motor-max) ; Maximum motor temp in degC
+(stats 'stat-count-time) ; Time since start of stat collection in seconds
+```
+
+#### stats-reset
+
+```clj
+(stats-reset)
+```
+
+Reset stat counters to 0.
+
 ### App Override Commands
 
 Several app-inputs can be detached from the external interfaces and overridden from lisp. This is useful to take advantage of existing throttle curves and control modes from the apps while providing a custom input source.
+
+**Note:** Detach does *not* mean that the app output is disabled, it means that you can provide the input for the app instead of having it read the external peripheral. So if you e.g. detach the app and override the input with 0 the app will keep sending the corresponding command to the motor as usual, even if that command is a stop command. If you want to disable the app output you can have a look at [app-disable-output](#app-disable-output).
 
 #### app-adc-detach
 
@@ -331,6 +417,60 @@ Detaches a peripherial from the APP ADC
 ```
 
 Sets the override value
+
+#### app-ppm-detach
+
+```clj
+(app-ppm-detach state)
+```
+
+Detaches the decoded ppm signal from APP PPM. 1 means detach, 0 means attach.
+
+#### app-ppm-override
+
+```clj
+(app-ppm-override value)
+```
+
+Sets the override value. Range -1.0 to 1.0.
+
+#### set-remote-state
+
+```clj
+(set-remote-state js-y js-x bt-c bt-z is-rev)
+; Where
+; js-y : Joystick Y axis, range -1.0 to 1.0, used for throttle position
+; js-x : Joystick X axis, range -1.0 to 1.0, unused by the app
+; bt-c : C button pressed state, 0 or 1, used for cruise control
+; bt-z : Z button pressed state, 0 or 1, unused by the app
+; is-rev : Reverse active, 0 or 1, reverse mode active
+```
+
+Send input to the VESC Remote app. Unlike the ADC and PPM apps, input can be sent to this app at any time without detaching it and it will be treated the same as a packet from a VESC Remote. That means the timeout as well as all VESC Remote settings will be used.
+
+#### app-disable-output
+
+```clj
+(app-disable-output ms)
+```
+
+Disable app output for ms milliseconds. 0 means enable now and -1 means disable forever. This can be used to override the control of apps temporarily.
+
+#### app-is-output-disabled
+
+```clj
+(app-is-output-disabled)
+```
+
+Check if app output is disabled. VESC Tool will disable app output during some detection routines, so when running a custom control script it might be useful to check this and disable the output when this value is true.
+
+#### app-pas-get-rpm
+
+```clj
+(app-pas-get-rpm)
+```
+
+Returns the pedal RPM measured by the PAS-app. If you want to implement your own PAS-control based on this RPM you can use [app-disable-output](#app-disable-output) to disable the output of the PAS-app.
 
 ### Motor Set Commands
 
@@ -438,7 +578,54 @@ Get directional current. Positive for torque in the forward direction and negati
 (get-current-in)
 ```
 
-Get input current. Will always be lower than the motor current. The closer the motor spins to full speed the closer the input current is to the motor current.
+#### get-id
+```clj
+(get-id)
+```
+
+Get FOC d-axis current.
+
+#### get-iq
+```clj
+(get-iq)
+```
+
+Get FOC q-axis current.
+
+#### get-vd
+```clj
+(get-vd)
+```
+
+Get FOC d-axis voltage.
+
+#### get-vq
+```clj
+(get-vq)
+```
+
+Get FOC q-axis voltage.
+
+#### get-est-lambda
+```clj
+(get-est-lambda)
+```
+
+Get FOC estimated flux linkage in Weber. Requires that one of the observers with flux linkage tracking is used. Added in FW 6.02.
+
+#### get-est-res
+```clj
+(get-est-res)
+```
+
+Get FOC estimated motor resistance in Ohm. This value is only accurate when the RPM is low and current is high. Added in FW 6.02.
+
+#### get-est-ind
+```clj
+(get-est-ind)
+```
+
+Get FOC estimated motor inductance Henry. Only works while the first HFI is running (not 45 Deg and not Coupled HFI). Added in FW 6.02.
 
 #### get-duty
 ```clj
@@ -454,16 +641,23 @@ Get duty cycle. Range -1.0 to 1.0.
 
 Get motor RPM. Negative values mean that the motor spins in the reverse direction.
 
-#### get-temp-fet
+#### get-pos
 ```clj
-(get-temp-fet)
+(get-pos)
 ```
 
-Get MOSFET temperature.
+Get motor position. Returns the motor PID pos (taking into account the Position Angle Division)
 
-#### get-temp-motor
+#### get-temp-fet
 ```clj
-(get-temp-motor)
+(get-temp-fet optFet)
+```
+
+Get MOSFET temperature. The argument optFet can be used to select senor 1 to 3. If it is left out or 0 the highest temperature is returned. If the hardware only has one sensor 0 is returned for sensors 1 to 3.
+
+#### get-temp-mot
+```clj
+(get-temp-mot)
 ```
 
 Get motor temperature.
@@ -502,6 +696,85 @@ Get the battery level, range 0.0 to 1.0. Requires that the battery type and numb
 ```
 
 Get fault code.
+
+#### get-ah
+```clj
+(get-ah)
+```
+
+Get the number of amp hours consumed since start.
+
+#### get-wh
+```clj
+(get-wh)
+```
+
+Get the number of watt hours consumed since start.
+
+#### get-ah-chg
+```clj
+(get-ah-chg)
+```
+
+Get the number of amp hours charged since start.
+
+#### get-wh-chg
+```clj
+(get-wh-chg)
+```
+
+Get the number of watt hours charged since start.
+
+### Setup Values
+
+These commands return the accumulated values from all VESC-based motor controllers on the CAN-bus. Note that the corresponding CAN status messages must be activated for these commands to work.
+
+#### setup-ah
+```clj
+(setup-ah)
+```
+
+Get the number of amp hours consumed since start.
+
+#### setup-ah-chg
+```clj
+(setup-ah-chg)
+```
+
+Get the number of amp hours charged since start.
+
+#### setup-wh
+```clj
+(setup-wh)
+```
+
+Get the number of watt hours consumed since start.
+
+#### setup-wh-chg
+```clj
+(setup-wh-chg)
+```
+
+Get the number of watt hours charged since start.
+
+#### setup-current
+```clj
+(setup-current)
+```
+
+Get total motor current. Positive means that current is flowing into the motor and negative means that current is flowing out of the motor (regenerative braking).
+
+#### setup-current-in
+```clj
+(setup-current-in)
+```
+
+#### setup-num-vescs
+```clj
+(setup-num-vescs)
+```
+
+Get the number of VESC-based motor controllers the setup values are accumulated from.
 
 ### CAN-Commands
 
@@ -675,6 +948,27 @@ Send standard ID CAN-frame with id and data. Data is a list with bytes, and the 
 
 Same as (can-send-sid), but sends extended ID frame.
 
+#### can-cmd
+
+```clj
+(can-cmd id cmd)
+```
+
+Execute command cmd on CAN-device with ID id. The command cmd is sent as a string and will be parsed and evaluated by the receiver.
+
+This is useful to execute arbitrary code on a CAN-device that is not covered by the other [CAN-Commands](#can-commands). This function has more overhead than other CAN-Commands, so if possible they should be used instead.
+
+Example:
+
+```clj
+; Configuration update on ID54:
+(can-cmd 54 "(conf-set max-speed 10.0)")
+
+; The string-functions can be used for setting something from a variable
+(def max-speed-kmh 25.0)
+(can-cmd 54 (str-from-n (/ max-speed-kmh 3.6) "(conf-set 'max-speed %.3f)"))
+```
+
 ### Math Functions
 
 #### sin
@@ -754,6 +1048,27 @@ Get the base-e logarithm of x.
 
 Get the base-10 logarithm of x.
 
+#### floor
+```clj
+(floor x)
+```
+
+Round x down to the closest integer. Added in FW 6.02.
+
+#### ceil
+```clj
+(ceil x)
+```
+
+Round x up to the closest integer. Added in FW 6.02.
+
+#### round
+```clj
+(round x)
+```
+
+Round x to the closest integer. Added in FW 6.02.
+
 #### deg2rad
 ```clj
 (deg2rad x)
@@ -825,6 +1140,9 @@ Raw data commands useful for debugging hardware issues.
 ```
 
 Get raw current measurements. Motor is the motor index (1 or 2), phase is the phase (1, 2 or 3) and useRaw is whether to convert the measurements to currents or to use raw ADC values.
+
+**NOTE**  
+These samples can come from either V0 or V7 depending on when the function is called (although most likely V7 as less other computations happen then), so when the motor is running this is most likely not going to look good, especially if the hardware does not have phase shunts. This function is intended for debugging hardware and returns just was goes into the ADC without any processing.
 
 Example for reading phase B on motor 1 as raw ADC values:
 
@@ -1047,6 +1365,61 @@ Write state to pin. If the pin is set to an output 1 will set it to VCC and 0 to
 
 Read state of pin. Returns 1 if the pin is high, 0 otherwise.
 
+### Input Capture (ICU)
+
+Input capture can be used to measure pulse lengths and periods on the PPM input pin. This can be used to measure the frequency and duty cycle of PWM-signals. The ICU driver was added in FW 6.02.
+
+#### icu-start
+
+```clj
+(icu-start freqHz pol)
+```
+
+Start input capture on the PPM-pin with timer frequency freqHz hertz and polarity pol. Polarity = 1 means that the high part of the pulse is measured and polarity = 0 means that the low part of the pulse is measured. Every time a pulse is received an [event](#events) is generated. Example:
+
+```clj
+; Run timer at 1 MHz and capture the positive part of the pulse
+(icu-start 1000000 1)
+
+(def cb-cnt 0)
+
+(defun proc-icu (width period)
+    (progn
+        (def icu-w width)
+        (def icu-p period)
+        (def cb-cnt (+ cb-cnt 1))
+))
+
+(defun event-handler ()
+    (loopwhile t
+        (recv
+            ((event-icu-period . ((? width) . (? period))) (proc-icu width period))
+            (_ nil)
+)))
+
+; Spawn event handler
+(event-register-handler (spawn event-handler))
+
+; Enable the period event, which is generated at the end of the period.
+(event-enable 'event-icu-period)
+```
+
+#### icu-width
+
+```clj
+(icu-width)
+```
+
+Get the width of the last captured pulse.
+
+#### icu-period
+
+```clj
+(icu-period)
+```
+
+Get the period of the last captured pulse.
+
 ### Configuration
 
 The following selection of app and motor parameters can be read and set from LispBM:
@@ -1061,6 +1434,7 @@ The following selection of app and motor parameters can be read and set from Lis
 'l-abs-current-max      ; Abs max current in A
 'l-min-erpm             ; Minimum ERPM (a negative value)
 'l-max-erpm             ; Maximum ERPM
+'l-erpm-start           ; Start limiting current at this fraction of max ERPM
 'l-min-vin              ; Minimum input voltage
 'l-max-vin              ; Maximum input voltage
 'l-min-duty             ; Minimum duty cycle
@@ -1069,8 +1443,8 @@ The following selection of app and motor parameters can be read and set from Lis
 'motor-type             ; Motor Type
                         ;    0: BLDC (6-step commutation)
                         ;    1: DC (DC motor on phase A and C)
-                        ;	2: FOC (Field Oriented Control)
-                        ;	3: GPD (General Purpose Drive)
+                        ;    2: FOC (Field Oriented Control)
+                        ;    3: GPD (General Purpose Drive)
 'l-watt-max             ; Maximum power regen in W
 'm-invert-direction     ; Invert motor direction, 0 or 1
 'm-out-aux-mode         ; AUX-pin output mode. Options:
@@ -1097,6 +1471,7 @@ The following selection of app and motor parameters can be read and set from Lis
                         ;    6: FOC_SENSOR_MODE_HFI_V3
                         ;    7: FOC_SENSOR_MODE_HFI_V4
                         ;    8: FOC_SENSOR_MODE_HFI_V5
+'si-motor-poles         ; Number of motor poles, must be multiple of 2
 'foc-current-kp         ; FOC current controller KP
 'foc-current-ki         ; FOC current controller KI
 'foc-motor-l            ; Motor inductance in microHenry
@@ -1142,6 +1517,22 @@ The following selection of app and motor parameters can be read and set from Lis
 'ppm-pulse-center       ; Pulse corresponding to center throttle in ms
 'ppm-ramp-time-pos      ; Positive ramping time in seconds
 'ppm-ramp-time-neg      ; Negative ramping time in seconds
+'adc-ctrl-type          ; ADC Control Type (Added in FW 6.02)
+                        ;    0:  ADC_CTRL_TYPE_NONE
+                        ;    1:  ADC_CTRL_TYPE_CURRENT
+                        ;    2:  ADC_CTRL_TYPE_CURRENT_REV_CENTER
+                        ;    3:  ADC_CTRL_TYPE_CURRENT_REV_BUTTON
+                        ;    4:  ADC_CTRL_TYPE_CURRENT_REV_BUTTON_BRAKE_ADC
+                        ;    5:  ADC_CTRL_TYPE_CURRENT_REV_BUTTON_BRAKE_CENTER
+                        ;    6:  ADC_CTRL_TYPE_CURRENT_NOREV_BRAKE_CENTER
+                        ;    7:  ADC_CTRL_TYPE_CURRENT_NOREV_BRAKE_BUTTON
+                        ;    8:  ADC_CTRL_TYPE_CURRENT_NOREV_BRAKE_ADC
+                        ;    9:  ADC_CTRL_TYPE_DUTY
+                        ;    10: ADC_CTRL_TYPE_DUTY_REV_CENTER
+                        ;    11: ADC_CTRL_TYPE_DUTY_REV_BUTTON
+                        ;    12: ADC_CTRL_TYPE_PID
+                        ;    13: ADC_CTRL_TYPE_PID_REV_CENTER
+                        ;    14: ADC_CTRL_TYPE_PID_REV_BUTTON
 ```
 
 #### conf-set
@@ -1221,7 +1612,7 @@ Example:
 (conf-set-pid-offset offset optStore)
 ```
 
-Set the PID controller offset such that the current angle becomes offset. This can be used in position control applications when e.g. homing against a limit switch. The optional argument optStore can be set to 1 to store the offset persistently (although that requires stopping the motor).
+Set the PID controller offset such that the current angle becomes offset. This can be used in position control applications when e.g. homing against a limit switch. The optional argument optStore can be set to true to store the offset persistently (although that requires stopping the motor).
 
 #### conf-measure-res
 
@@ -1457,30 +1848,20 @@ Apply function f to every element in list lst. Example:
 
 This example creates an anonymous function that takes one argument and returns that argument multiplied by 5. Map then applies it to every element in the list (1 2 3 4), which yields the list (5 10 15 20).
 
-#### iota
-
-```clj
-(iota n)
-```
-
-Create list from 0 to n, excluding n. Example:
-
-```clj
-(iota 5)
-> (0 1 2 3 4)
-```
-
 #### range
 
 ```clj
-(range start end)
+(range optStart end)
 ```
 
-Create a list from start to end, excluding end. Example:
+Create a list from start to end, excluding end. Range also works with just one argument, which is takes as end assuming start is 0. Example:
 
 ```clj
 (range 2 8)
 > (2 3 4 5 6 7)
+
+(range 5)
+> (0 1 2 3 4)
 ```
 
 #### foldl
@@ -1750,10 +2131,14 @@ Convert string str to lower case. Example:
 #### str-cmp
 
 ```clj
-(str-cmp str1 str1)
+(str-cmp str1 str1 optN)
 ```
 
-Compare strings str1 and str2. Works in the same way as the strcmp-function in C, meaning that equal strings return 0 and different strings return their difference according how they would be sorted. Example:
+Compare strings str1 and str2. Works in the same way as the strcmp-function in C, meaning that equal strings return 0 and different strings return their difference according how they would be sorted.
+
+The optional argument optN can be used to specify how many characters to compare (like strncmp in C). If it is left out all characters will be compared.
+
+Example:
 
 ```clj
 (str-cmp "Hello" "Hello")
@@ -1764,6 +2149,9 @@ Compare strings str1 and str2. Works in the same way as the strcmp-function in C
 
 (str-cmp "World" "Hello")
 > 15
+
+(str-cmp "ab" "abcd" 2) ; Compare only the first two characters
+> 0
 ```
 
 #### str-cmp-asc
@@ -1795,6 +2183,35 @@ Calculate length of string str excluding the null termination. Example:
 > 5
 ```
 
+#### to-str
+
+```clj
+(to-str arg1 ... argN)
+```
+
+Convert LBM-types to their string representation and return that string. Example:
+
+```clj
+(to-str '(1 2 3))
+> "(1 2 3)"
+
+(to-str "aAa" 4 '(a 2 3) 2 3 "Hello")
+> "aAa 4 (a 2 3) 2 3 Hello"
+```
+
+#### to-str-delim
+
+```clj
+(to-str-delim delimiter arg1 ... argN)
+```
+
+Same as [to-str](#to-str), but with a custom delimiter. Example:
+
+```clj
+(to-str-delim "::" "aAa" 4 '(a 2 3) 2 3 "Hello")
+> "aAa::4::(a 2 3)::2::3::Hello"
+```
+
 ## Events
 
 Events can be used to execute code for certain events, such as when CAN-frames are received. To use events you must first register an event handler, then enable the events you want to receive. As the event handler blocks until the event arrives it is useful to spawn a thread to handle events so that other things can be done in the main thread at the same time.
@@ -1802,21 +2219,20 @@ Events can be used to execute code for certain events, such as when CAN-frames a
 The following example shows how to spawn a thread that handles SID (standard-id) CAN-frames and custom app data:
 
 ```clj
-(define proc-sid (lambda (id data)
-    (print (list id data)) ; Print the ID and data
-))
+(defun proc-sid (id data)
+    (print (list id data))
+)
 
-(define proc-data (lambda (data)
-    (progn
-        (print data)
-)))
+(defun proc-data (data)
+    (print data)
+)
 
-(define event-handler (lambda ()
-    (progn
-        (recv ((event-can-sid (? id) . (? data)) (proc-sid id data))
-        (recv ((event-data-rx ? data) (proc-data data))
-              (_ nil)) ; Ignore other events
-        (event-handler) ; Call self again to make this a loop
+(defun event-handler ()
+    (loopwhile t
+        (recv
+            ((event-can-sid . ((? id) . (? data))) (proc-sid id data))
+            ((event-data-rx . (? data)) (proc-data data))
+            (_ nil) ; Ignore other events
 )))
 
 ; Spawn the event handler thread and pass the ID it returns to C
@@ -1832,12 +2248,35 @@ The following example shows how to spawn a thread that handles SID (standard-id)
 Possible events to register are
 
 ```clj
-(event-enable 'event-can-sid) ; Sends (signal-can-sid id data), where id is U32 and data is a byte array
-(event-enable 'event-can-eid) ; Sends (signal-can-eid id data), where id is U32 and data is a byte array
-(event-enable 'event-data-rx) ; Sends (signal-data-rx data), where data is a byte array
+(event-enable 'event-can-sid)  ; Sends (signal-can-sid . (id . data)), where id is U32 and data is a byte array
+(event-enable 'event-can-eid)  ; Sends (signal-can-eid . (id . data)), where id is U32 and data is a byte array
+(event-enable 'event-data-rx)  ; Sends (signal-data-rx . data), where data is a byte array
+(event-enable 'event-shutdown) ; Sends signal-shutdown
+(event-enable 'event-icu-width) ; Sends (event-icu-width . (width . period))
+(event-enable 'event-icu-period) ; Sends (event-icu-period . (width . period))
 ```
 
 The CAN-frames arrive whenever data is received on the CAN-bus and data-rx is received for example when data is sent from a Qml-script in VESC Tool.
+
+### Event Description
+
+**event-can-sid**  
+This event is sent when standard id CAN-frames are received.
+
+**event-can-eid**  
+This event is sent when extended id CAN-frames are received.
+
+**event-data-rx**  
+This event is sent when custom app data is sent from VESC Tool or other connected devices. This works using all communication ports including USB, UART and CAN-bus.
+
+**event-shutdown**  
+This event is sent when the VESC is about to shut down. Note that this event currently only works on hardware with a power switch. If that is not the case you could try to, for example, monitor the input voltage and simulate this event when it drops below a set level.
+
+**event-icu-width**  
+This event is sent when the input capture unit captures a pulse. Both the pulse width and the period of the last pulse are provided.
+
+**event-icu-period**  
+This event is sent when the input capture unit ends a period and the next pulse starts. Both the pulse width and the period are provided.
 
 ## Byte Arrays
 
@@ -2149,6 +2588,241 @@ Set graph index to which data points are sent.
 ```
 
 Send a xy-point to the selected graph in the plot.
+
+## IO Boards
+
+CAN-connected IO-boards can be interfaced using the functions in this section.
+
+#### ioboard-get-adc
+
+```clj
+(ioboard-get-adc can-id channel)
+```
+
+Read ADC-input channel from IO-board with can-id. Channel range: 1 to 8. If the IO-board with can-id is not present on the CAN-bus or if the channel is missing -1 will be returned.
+
+#### ioboard-get-digital
+
+```clj
+(ioboard-get-digital can-id channel)
+```
+
+Read  digital input channel from IO-board with can-id. Channel range: 1 to 64. If the IO-board with can-id is not present on the CAN-bus or if the channel is missing -1 will be returned.
+
+#### ioboard-set-digital
+
+```clj
+(ioboard-set-digital can-id channel state)
+```
+
+Write digital output channel to IO-board with can-id. State can be 1 or 0.
+
+#### ioboard-set-pwm
+
+```clj
+(ioboard-set-pwm can-id channel duty)
+```
+
+Write PWM-output channel to IO-board with can-id. The value duty can be 0.0 to 1.0.
+
+## Logging
+
+It is possible to log arbitrary data to log-devices such as the VESC Express, which can be connected on the CAN-bus.
+
+Every log field consists of a keyword, name, unit, precision and some flags. Most of these fields control how VESC Tool renders the log. In the csv-file for the log they only show up in the first line as headers for each column.
+
+VESC Tool will look for some special keywords to handle statistics and rendering on the map. If these keywords are missing the log can still be shown, but some of the functionality and statistics in VESC Tool will not be available. The following are the special keywords:
+
+**t_day**  
+Time of day in seconds. Used for statistics. This field is created by the log module when append-time is set to 1.
+
+**gnss_h_acc**  
+GNSS horizontal accuracy. Used for outlier filtering. This field is created by the log module when apped-gnss is set to 1.
+
+**gnss_lat**  
+GNSS latitude. Used for plotting traces on the map and for calculating statistics. This field is created by the log module when apped-gnss is set to 1.
+
+**gnss_lon**  
+GNSS longitude. Used for plotting traces on the map and for calculating statistics. This field is created by the log module when apped-gnss is set to 1.
+
+**gnss_alt**  
+GNSS altitude. Used for plotting traces on the map and for calculating statistics. This field is created by the log module when apped-gnss is set to 1.
+
+**trip_vesc**  
+VESC trip counter in meters. Used for calculating statistics.
+
+**trip_vesc_abs**  
+Absolute VESC trip counter in meters. Used for calculating statistics.
+
+**trip_gnss**  
+GNSS trip counter in meters. Used for calculating statistics. This field is automatically generated by VESC Tool from gnss_lat, gnss_lon and gnss_alt if it is missing.
+
+**cnt_wh**  
+Watt hour counter. Used for calculating statistics.
+
+**cnt_wh_chg**  
+Watt hour counter charging. Used for calculating statistics.
+
+**cnt_ah**  
+Amp hour counter. Used for calculating statistics.
+
+**cnt_ah_chg**  
+Amp hour counter charging. Used for calculating statistics.
+
+**roll**  
+IMU roll in degrees. Used for the IMU 3D plot.
+
+**pitch**  
+IMU pitch in degrees. Used for the IMU 3D plot.
+
+**yaw**  
+IMU yaw in degrees. Used for the IMU 3D plot.
+
+**fault**  
+Fault code. Converted to a fault string in the VESC Tool log analysis tool.
+
+#### log-config-field
+
+```clj
+(log-config-field
+    can-id
+    field-ind
+    key
+    name
+    unit
+    precision
+    is-relative
+    is-timestamp
+)
+```
+
+Configure log field on log device. Parameters:
+
+**can-id**  
+ID on the CAN-bus. Setting the id to -1 will send the data to VESC Tool.
+
+**field-ind**  
+Field index in the log.
+
+**key**  
+Keyword string.
+
+**name**  
+Name string.
+
+**unit**  
+Unit string.
+
+**is-relative**  
+Relative fields are displayed relative to the start value of the log.
+
+**is-timestamp**  
+Timestamp fields are displayed with the format hh:mm:ss.
+
+#### log-start
+
+```clj
+(log-start
+    can-id
+    field-num
+    rate-hz
+    append-time
+    apped-gnss
+)
+```
+
+Start logging. Before starting to log all fields should be configured with [log-config-field](#log-config-field).
+
+**can-id**  
+ID on the CAN-bus. Setting the id to -1 will send the data to VESC Tool.
+
+**field-num**  
+Number of log fields.
+
+**rate-hz**  
+Log rate in Hz.
+
+**append-time**  
+If set to true the log device will append a timestamp to each sample.
+
+**append-gnss**  
+If set to true the log device will append a GNSS-position to each sample. This requires a GNSS-receiver on the log device and the log will not start until a valid position is available.
+
+#### log-stop
+
+```clj
+(log-stop can-id)
+```
+
+Stop logging data on log device with can-id. Setting the id to -1 will send the data to VESC Tool.
+
+#### log-send-f32
+
+```clj
+(log-send-f32 can-id from-field-ind sample1 ... sampleN)
+```
+
+Send log samples to log device with can-id. This function takes 1 to 100 samples as arguments which will be applied to the log fields starting from from-field-ind. The samples can be numbers or lists of numbers. Setting the id to -1 will send the data to VESC Tool.
+
+#### log-send-f64
+
+```clj
+(log-send-f64 can-id from-field-ind sample1 ... sampleN)
+```
+
+Same as [log-send-f32](#log-send-f32) but uses 64-bit values for higher precision and takes up to 50 samples. Useful for e.g. gnss-positions where 32-bit floats do not give enough precision due to the size of the earth.
+
+## GNSS
+
+If a GNSS-receiver such as the VESC Express is connected on the CAN-bus, the position, speed, time and precision data from it can be read from LBM.
+
+#### gnss-lat-lon
+
+```clj
+(gnss-lat-lon)
+```
+
+Returns the latitude and longitude of the position as a list with two elements.
+
+#### gnss-height
+
+```clj
+(gnss-height)
+```
+
+Returns the height of the position in meters.
+
+#### gnss-speed
+
+```clj
+(gnss-speed)
+```
+
+Returns the speed on meters per second.
+
+#### gnss-hdop
+
+```clj
+(gnss-hdop)
+```
+
+Returns the hdop-value of the position. Lower values mean that the precision is better.
+
+#### gnss-date-time
+
+```clj
+(gnss-date-time)
+```
+
+Returns date and time of the last position sample as a list with the format (year month day hours minutes seconds milliseconds).
+
+#### gnss-age
+
+```clj
+(gnss-age)
+```
+
+Returns the age of the last gnss-sample in seconds.
 
 ## How to update
 

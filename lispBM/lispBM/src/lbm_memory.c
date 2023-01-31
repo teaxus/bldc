@@ -15,11 +15,12 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "lbm_memory.h"
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>
 
+#include "lbm_memory.h"
+#include "platform_mutex.h"
 
 /* Status bit patterns */
 #define FREE_OR_USED  0  //00b
@@ -39,10 +40,17 @@ static lbm_uint *memory = NULL;
 static lbm_uint memory_size;  // in 4 or 8 byte words depending on 32 or 64 bit platform
 static lbm_uint bitmap_size;  // in 4 or 8 byte words
 static lbm_uint memory_base_address = 0;
+static mutex_t lbm_mem_mutex;
+static bool    lbm_mem_mutex_initialized;
 
 int lbm_memory_init(lbm_uint *data, lbm_uint data_size,
                     lbm_uint *bits, lbm_uint bits_size) {
 
+  if (!lbm_mem_mutex_initialized) {
+    mutex_init(&lbm_mem_mutex);
+  }
+  mutex_lock(&lbm_mem_mutex);
+  int res = 0;
   if (data == NULL || bits == NULL) return 0;
 
   if (((lbm_uint)data % sizeof(lbm_uint) != 0) ||
@@ -54,20 +62,22 @@ int lbm_memory_init(lbm_uint *data, lbm_uint data_size,
     // data is not aligned to sizeof lbm_uint
     // size is too small
     // or size is not a multiple of 4
-    return 0;
+  } else {
+
+    bitmap = bits;
+    bitmap_size = bits_size;
+
+    for (lbm_uint i = 0; i < bitmap_size; i ++) {
+      bitmap[i] = 0;
+    }
+
+    memory = data;
+    memory_base_address = (lbm_uint)data;
+    memory_size = data_size;
+    res = 1;
   }
-
-  bitmap = bits;
-  bitmap_size = bits_size;
-
-  for (lbm_uint i = 0; i < bitmap_size; i ++) {
-    bitmap[i] = 0;
-  }
-
-  memory = data;
-  memory_base_address = (lbm_uint)data;
-  memory_size = data_size;
-  return 1;
+  mutex_unlock(&lbm_mem_mutex);
+  return res;
 }
 
 static inline lbm_uint address_to_bitmap_ix(lbm_uint *ptr) {
@@ -79,9 +89,9 @@ static inline lbm_uint address_to_bitmap_ix(lbm_uint *ptr) {
 }
 
 lbm_int lbm_memory_address_to_ix(lbm_uint *ptr) {
-  /* TODO: assuming that that index
+  /* TODO: assuming that index
            will have more then enough room in the
-           positive halv of a 28bit integer */
+           positive half of a 28bit integer */
   return (lbm_int)address_to_bitmap_ix(ptr);
 }
 
@@ -133,7 +143,7 @@ lbm_uint lbm_memory_num_free(void) {
   if (memory == NULL || bitmap == NULL) {
     return 0;
   }
-
+  mutex_lock(&lbm_mem_mutex);
   unsigned int state = INIT;
   lbm_uint sum_length = 0;
 
@@ -164,10 +174,12 @@ lbm_uint lbm_memory_num_free(void) {
       state = INIT;
       break;
     default:
+      mutex_unlock(&lbm_mem_mutex);
       return 0;
       break;
     }
   }
+  mutex_unlock(&lbm_mem_mutex);
   return sum_length;
 }
 
@@ -175,7 +187,7 @@ lbm_uint lbm_memory_longest_free(void) {
   if (memory == NULL || bitmap == NULL) {
     return 0;
   }
-
+  mutex_lock(&lbm_mem_mutex);
   unsigned int state = INIT;
   lbm_uint max_length = 0;
 
@@ -209,10 +221,12 @@ lbm_uint lbm_memory_longest_free(void) {
       state = INIT;
       break;
     default:
+      mutex_unlock(&lbm_mem_mutex);
       return 0;
       break;
     }
   }
+  mutex_unlock(&lbm_mem_mutex);
   return max_length;
 }
 
@@ -222,6 +236,8 @@ lbm_uint *lbm_memory_allocate(lbm_uint num_words) {
   if (memory == NULL || bitmap == NULL) {
     return NULL;
   }
+
+  mutex_lock(&lbm_mem_mutex);
 
   lbm_uint start_ix = 0;
   lbm_uint end_ix = 0;
@@ -266,9 +282,9 @@ lbm_uint *lbm_memory_allocate(lbm_uint num_words) {
     case START_END:
       state = INIT;
       break;
-    default:
+    default: // error case
+      mutex_unlock(&lbm_mem_mutex);
       return NULL;
-      break;
     }
   }
 
@@ -279,42 +295,68 @@ lbm_uint *lbm_memory_allocate(lbm_uint num_words) {
       set_status(start_ix, START);
       set_status(end_ix, END);
     }
-
+    mutex_unlock(&lbm_mem_mutex);
     return bitmap_ix_to_address(start_ix);
   }
+  mutex_unlock(&lbm_mem_mutex);
   return NULL;
 }
 
 int lbm_memory_free(lbm_uint *ptr) {
 
-  lbm_uint ix = address_to_bitmap_ix(ptr);
+  int r = 0;
+  if (lbm_memory_ptr_inside(ptr)) {
+    mutex_lock(&lbm_mem_mutex);
+    lbm_uint ix = address_to_bitmap_ix(ptr);
 
-  switch(status(ix)) {
-  case START:
-    set_status(ix, FREE_OR_USED);
-    for (lbm_uint i = ix; i < (bitmap_size << BITMAP_SIZE_SHIFT); i ++) {
-      if (status(i) == END) {
-        set_status(i, FREE_OR_USED);
-        return 1;
+    switch(status(ix)) {
+    case START:
+      set_status(ix, FREE_OR_USED);
+      for (lbm_uint i = ix; i < (bitmap_size << BITMAP_SIZE_SHIFT); i ++) {
+        if (status(i) == END) {
+          set_status(i, FREE_OR_USED);
+          r = 1;
+          break;
+        }
       }
+      break;
+    case START_END:
+      set_status(ix, FREE_OR_USED);
+      r = 1;
+      break;
+    default:
+      break;
     }
-    return 0;
-  case START_END:
-    set_status(ix, FREE_OR_USED);
-    return 1;
+    mutex_unlock(&lbm_mem_mutex);
+  }
+  return r;
+}
+//Malloc/free like interface
+void* lbm_malloc(size_t size) {
+  lbm_uint alloc_size;
+  if (size % sizeof(lbm_uint) == 0) {
+    alloc_size = size / (sizeof(lbm_uint));
+  } else {
+    alloc_size = (size / (sizeof(lbm_uint))) + 1;
   }
 
-  return 0;
+  return lbm_memory_allocate(alloc_size);
+}
+
+void lbm_free(void *ptr) {
+  lbm_memory_free(ptr);
 }
 
 int lbm_memory_shrink(lbm_uint *ptr, lbm_uint n) {
   lbm_uint ix = address_to_bitmap_ix(ptr);
 
+  mutex_lock(&lbm_mem_mutex);
   if (status(ix) != START) {
+    mutex_unlock(&lbm_mem_mutex);
     return 0; // ptr does not point to the start of an allocated range.
   }
-
   if (status(ix) == START_END) {
+    mutex_unlock(&lbm_mem_mutex);
     return 0; // Cannot shrink a 1 element allocation
   }
 
@@ -322,6 +364,7 @@ int lbm_memory_shrink(lbm_uint *ptr, lbm_uint n) {
   unsigned int i = 0;
   for (i = 0; i < ((bitmap_size << BITMAP_SIZE_SHIFT) - ix); i ++) {
     if (status(ix+i) == END && i < n) {
+      mutex_unlock(&lbm_mem_mutex);
       return 0; // cannot shrink allocation to a larger size
     }
     switch(status(ix+i)) {
@@ -360,14 +403,11 @@ int lbm_memory_shrink(lbm_uint *ptr, lbm_uint n) {
         break;
       }
   }
+  mutex_unlock(&lbm_mem_mutex);
   return 1;
 }
 
 int lbm_memory_ptr_inside(lbm_uint *ptr) {
-  int r = 0;
-
-  if ((lbm_uint)ptr >= (lbm_uint)memory &&
-      (lbm_uint)ptr < (lbm_uint)memory + (memory_size * sizeof(lbm_uint)))
-    r = 1;
-  return r;
+  return ((lbm_uint)ptr >= (lbm_uint)memory &&
+          (lbm_uint)ptr < (lbm_uint)memory + (memory_size * sizeof(lbm_uint)));
 }

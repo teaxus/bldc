@@ -1,5 +1,5 @@
 /*
-    Copyright 2018,2020 Joel Svensson	svenssonjoel@yahoo.se
+    Copyright 2018, 2020, 2023 Joel Svensson   svenssonjoel@yahoo.se
 
     This program is free software: you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -27,6 +27,11 @@
 
 #include "lispbm.h"
 #include "extensions/array_extensions.h"
+#include "extensions/math_extensions.h"
+#include "extensions/string_extensions.h"
+#include "extensions/runtime_extensions.h"
+#include "extensions/matvec_extensions.h"
+#include "extensions/random_extensions.h"
 #include "lbm_channel.h"
 
 #define WAIT_TIMEOUT 2500
@@ -77,28 +82,28 @@ void sleep_callback(uint32_t us) {
 volatile bool experiment_success = false;
 volatile bool experiment_done = false;
 
+lbm_cid test_cid = -1;
+
 void context_done_callback(eval_context_t *ctx) {
   char output[128];
   lbm_value t = ctx->r;
 
   int res = lbm_print_value(output, 128, t);
 
-  if ( res >= 0) {
-    printf("O: %s\n", output);
+  if (ctx->id == test_cid) {
+    experiment_done = true;
+    if (res && lbm_type_of(t) == LBM_TYPE_SYMBOL && lbm_dec_sym(t) == SYM_TRUE){ // structural_equality(car(rest),car(cdr(rest)))) {
+      experiment_success = true;
+      printf("Test: OK!\n");
+      printf("Result: %s\n", output);
+    } else {
+      printf("Test: Failed!\n");
+      printf("Result: %s\n", output);
+    }
   } else {
-    printf("%s\n", output);
+    printf("Thread %d finished: %s\n", ctx->id, output);
   }
-
-  if (res && lbm_type_of(t) == LBM_TYPE_SYMBOL && lbm_dec_sym(t) == SYM_TRUE){ // structural_equality(car(rest),car(cdr(rest)))) {
-    experiment_success = true;
-    printf("Test: OK!\n");
-  } else {
-    printf("Test: Failed!\n");
-  }
-
-  experiment_done = true;
 }
-
 
 bool dyn_load(const char *str, const char **code) {
 
@@ -106,61 +111,39 @@ bool dyn_load(const char *str, const char **code) {
   if (strlen(str) == 5 && strncmp(str, "defun", 5) == 0) {
     *code = "(define defun (macro (name args body) `(define ,name (lambda ,args ,body))))";
     res = true;
-  } else if (strlen(str) == 7 && strncmp(str, "reverse", 7) == 0) {
-    *code = "(define reverse (lambda (xs)"
-            "(let ((revacc (lambda (acc xs)"
-	    "(if (eq nil xs) acc"
-	    "(revacc (cons (car xs) acc) (cdr xs))))))"
-            "(revacc nil xs))))";
-    res = true;
-  } else if (strlen(str) == 4 && strncmp(str, "iota", 4) == 0) {
+  }  else if (strlen(str) == 4 && strncmp(str, "iota", 4) == 0) {
     *code = "(define iota (lambda (n)"
-            "(let ((iacc (lambda (acc i)"
-            "(if (< i 0) acc"
-            "(iacc (cons i acc) (- i 1))))))"
-            "(iacc nil n))))";
-    res = true;
-  } else if (strlen(str) == 6 && strncmp(str, "length", 6) == 0) {
-    *code = "(define length (lambda (xs)"
-	    "(let ((len (lambda (l xs)"
-	    "(if (eq xs nil) l"
-	    "(len (+ l 1) (cdr xs))))))"
-            "(len 0 xs))))";
+            "(range 0 n)))";
     res = true;
   } else if (strlen(str) == 4 && strncmp(str, "take", 4) == 0) {
     *code = "(define take (lambda (n xs)"
-	    "(let ((take-tail (lambda (acc n xs)"
-	    "(if (= n 0) acc"
-	    "(take-tail (cons (car xs) acc) (- n 1) (cdr xs))))))"
+            "(let ((take-tail (lambda (acc n xs)"
+            "(if (= n 0) acc"
+            "(take-tail (cons (car xs) acc) (- n 1) (cdr xs))))))"
             "(reverse (take-tail nil n xs)))))";
     res = true;
   } else if (strlen(str) == 4 && strncmp(str, "drop", 4) == 0) {
     *code = "(define drop (lambda (n xs)"
-	    "(if (= n 0) xs"
-	    "(if (eq xs nil) nil"
+            "(if (= n 0) xs"
+            "(if (eq xs nil) nil"
             "(drop (- n 1) (cdr xs))))))";
     res = true;
   } else if (strlen(str) == 3 && strncmp(str, "zip", 3) == 0) {
     *code = "(define zip (lambda (xs ys)"
-	    "(if (eq xs nil) nil"
-	    "(if (eq ys nil) nil"
+            "(if (eq xs nil) nil"
+            "(if (eq ys nil) nil"
             "(cons (cons (car xs) (car ys)) (zip (cdr xs) (cdr ys)))))))";
-    res = true;
-  } else if (strlen(str) == 3 && strncmp(str, "map", 3) == 0) {
-    *code = "(define map (lambda (f xs)"
-	    "(if (eq xs nil) nil"
-            "(cons (f (car xs)) (map f (cdr xs))))))";
     res = true;
   } else if (strlen(str) == 6 && strncmp(str, "lookup", 6) == 0) {
     *code = "(define lookup (lambda (x xs)"
-	    "(if (eq xs nil) nil"
-	    "(if (eq (car (car xs)) x)"
-	    "(car (cdr (car xs)))"
+            "(if (eq xs nil) nil"
+            "(if (eq (car (car xs)) x)"
+            "(car (cdr (car xs)))"
             "(lookup x (cdr xs))))))";
     res = true;
   } else if (strlen(str) == 5 && strncmp(str, "foldr", 5) == 0) {
     *code = "(define foldr (lambda (f i xs)"
-	    "(if (eq xs nil) i"
+            "(if (eq xs nil) i"
             "(f (car xs) (foldr f i (cdr xs))))))";
     res = true;
   } else if (strlen(str) == 5 && strncmp(str, "foldl", 5) == 0) {
@@ -212,9 +195,33 @@ LBM_EXTENSION(ext_numbers, args, argn) {
       break;
     }
   }
-  return lbm_enc_sym(b ? SYM_TRUE : SYM_NIL);  
+  return lbm_enc_sym(b ? SYM_TRUE : SYM_NIL);
 }
 
+
+LBM_EXTENSION(ext_event_sym, args, argn) {
+  lbm_value res = ENC_SYM_EERROR;
+  if (argn == 1 && lbm_is_symbol(args[0])) {
+    lbm_event_t e;
+    e.type = LBM_EVENT_SYM;
+    e.sym  = lbm_dec_sym(args[0]);
+    lbm_event(e, NULL, 0);
+    res = ENC_SYM_TRUE;
+  }
+  return res;
+}
+
+LBM_EXTENSION(ext_event_array, args, argn) {
+  lbm_value res = ENC_SYM_EERROR;
+  if (argn == 1 && lbm_is_symbol(args[0])) {
+    lbm_event_t e;
+    e.type = LBM_EVENT_SYM_ARRAY;
+    e.sym = lbm_dec_sym(args[0]);
+    lbm_event(e, "Hello world", 12);
+    res = ENC_SYM_TRUE;
+  }
+  return res;
+}
 
 
 int main(int argc, char **argv) {
@@ -225,7 +232,7 @@ int main(int argc, char **argv) {
   //  bool compress_decompress = false;
 
   bool stream_source = false;
-  
+
   pthread_t lispbm_thd;
   lbm_cons_t *heap_storage = NULL;
 
@@ -285,14 +292,14 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  lbm_uint *memory = malloc(sizeof(lbm_uint) * LBM_MEMORY_SIZE_12K);
+  lbm_uint *memory = malloc(sizeof(lbm_uint) * LBM_MEMORY_SIZE_14K);
   if (memory == NULL) return 0;
-  lbm_uint *bitmap = malloc(sizeof(lbm_uint) * LBM_MEMORY_BITMAP_SIZE_12K);
+  lbm_uint *bitmap = malloc(sizeof(lbm_uint) * LBM_MEMORY_BITMAP_SIZE_14K);
   if (bitmap == NULL) return 0;
 
 
-  res = lbm_memory_init(memory, LBM_MEMORY_SIZE_12K,
-                        bitmap, LBM_MEMORY_BITMAP_SIZE_12K);
+  res = lbm_memory_init(memory, LBM_MEMORY_SIZE_14K,
+                        bitmap, LBM_MEMORY_BITMAP_SIZE_14K);
   if (res)
     printf("Memory initialized.\n");
   else {
@@ -345,6 +352,14 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  res = lbm_eval_init_events(20);
+  if (res)
+    printf("Events initialized.\n");
+  else {
+    printf("Error initializing events.\n");
+    return 0;
+  }
+
   res = lbm_extensions_init(extension_storage, EXTENSION_STORAGE_SIZE);
   if (res)
     printf("Extensions initialized.\n");
@@ -353,7 +368,47 @@ int main(int argc, char **argv) {
     return 0;
   }
 
-  lbm_array_extensions_init();
+  if (lbm_array_extensions_init()) {
+    printf("Array extensions initialized.\n");
+  } else {
+    printf("Array extensions failed.\n");
+    return 0;
+  }
+
+  if (lbm_math_extensions_init()) {
+    printf("Math extensions initialized.\n");
+  } else {
+    printf("Math extensions failed.\n");
+    return 0;
+  }
+
+  if (lbm_string_extensions_init()) {
+    printf("String extensions initialized.\n");
+  } else {
+    printf("String extensions failed.\n");
+    return 0;
+  }
+
+  if (lbm_runtime_extensions_init()) {
+    printf("Runtime extensions initialized.\n");
+  } else {
+    printf("Runtime extensions failed.\n");
+    return 0;
+  }
+
+  if (lbm_matvec_extensions_init()) {
+    printf("Matvec extensions initialized.\n");
+  } else {
+    printf("Matvec extensions failed.\n");
+    return 0;
+  }
+
+  if (lbm_random_extensions_init()) {
+    printf("Random extensions initialized.\n");
+  } else {
+    printf("Random extensions failed.\n");
+    return 0;
+  }
 
   res = lbm_add_extension("ext-even", ext_even);
   if (res)
@@ -378,7 +433,23 @@ int main(int argc, char **argv) {
     printf("Error adding extension.\n");
     return 0;
   }
-  
+
+  res = lbm_add_extension("event-sym", ext_event_sym);
+  if (res)
+    printf("Extension added.\n");
+  else {
+    printf("Error adding extension.\n");
+    return 0;
+  }
+
+  res = lbm_add_extension("event-array", ext_event_array);
+  if (res)
+    printf("Extension added.\n");
+  else {
+    printf("Error adding extension.\n");
+    return 0;
+  }
+
   lbm_set_dynamic_load_callback(dyn_load);
   lbm_set_timestamp_us_callback(timestamp_callback);
   lbm_set_usleep_callback(sleep_callback);
@@ -427,6 +498,11 @@ int main(int argc, char **argv) {
   //lbm_create_char_stream_from_string(&string_tok_state,
   //                                   &string_tok,
   //                                   code_buffer);
+
+  lbm_pause_eval_with_gc(20);
+  while (lbm_get_eval_state() != EVAL_CPS_STATE_PAUSED) {
+    sleep_callback(1000);
+  }
   if (stream_source) {
     lbm_create_buffered_char_channel(&buffered_tok_state,
                                      &string_tok);
@@ -445,6 +521,8 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  test_cid = cid; // the result which is important for success or failure of test.
+
   lbm_continue_eval();
 
   if (stream_source) {
@@ -455,7 +533,7 @@ int main(int argc, char **argv) {
         break;
       }
       int ch_res = lbm_channel_write(&string_tok, code_buffer[i]);
-      
+
       if (ch_res == CHANNEL_SUCCESS) {
         //printf("wrote: %c\n", code_buffer[i]);
         i ++;
@@ -467,8 +545,16 @@ int main(int argc, char **argv) {
     }
   }
 
+  int i = 0;
   while (!experiment_done) {
+    if (i == 1000000) break;
     sleep_callback(1000);
+    i ++;
+  }
+
+  if (i == 1000000) {
+    printf ("experiment failed due to taking longer than 10 seconds\n");
+    experiment_success = false;
   }
 
   lbm_pause_eval();

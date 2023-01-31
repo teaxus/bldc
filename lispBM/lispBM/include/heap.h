@@ -303,7 +303,18 @@ lbm_uint lbm_heap_size_bytes(void);
  * \return An lbm_value referring to a cons_cell or enc_sym(SYM_MERROR) in case the heap is full.
  */
 lbm_value lbm_heap_allocate_cell(lbm_type type);
-
+/** Allocate a list of n heap-cells.
+ * \param n The number of heap-cells to allocate.
+ * \return A list of heap-cells of Memory error if unable to allocate.
+ */
+lbm_value lbm_heap_allocate_list(unsigned int n);
+/** Allocate a list of n heap-cells and initialize the values.
+ * \pram ls The result list is passed through this ptr.
+ * \param m The length of list to allocate.
+ * \param ... The values to initialize the list with.
+ * \return True of False depending on success of allocation.
+ */
+bool lbm_heap_allocate_list_init(lbm_value *ls, unsigned int n, ...);
 /** Decode an lbm_value representing a string into a C string
  *
  * \param val Value
@@ -396,6 +407,14 @@ lbm_value lbm_cadr(lbm_value c);
  * if not cons or nil, the return value is enc_sym(SYM_TERROR) for type error.
  */
 lbm_value lbm_cdr(lbm_value cons);
+/** Accesses the cdr of an cdr field of an lbm_cons_t.
+ *
+ * \param cons Value
+ * \return The cdr of the cdr field of the lbm_cons_t if cons is a reference to a heap cell.
+ * If cons is nil, the return value is nil. If the value
+ * if not cons or nil, the return value is enc_sym(SYM_TERROR) for type error.
+ */
+lbm_value lbm_cddr(lbm_value c);
 /** Update the value stored in the car field of a heap cell.
  *
  * \param c Value referring to a heap cell.
@@ -410,7 +429,14 @@ int lbm_set_car(lbm_value c, lbm_value v);
  * \return 1 on success and 0 if the c value does not refer to a heap cell.
  */
 int lbm_set_cdr(lbm_value c, lbm_value v);
-
+/** Update the value stored in the car and cdr fields of a heap cell.
+ *
+ * \param c Value referring to a heap cell.
+ * \param car_val Value to replace the car field with.
+ * \param cdr_val Value to replace the cdr field with.
+ * \return 1 on success and 0 if the c value does not refer to a heap cell.
+ */
+int lbm_set_car_and_cdr(lbm_value c, lbm_value car_val, lbm_value cdr_val);
 // List functions
 /** Calculate the length of a proper list
  * \warning This is a dangerous function that should be used carefully. Cyclic structures on the heap
@@ -420,6 +446,16 @@ int lbm_set_cdr(lbm_value c, lbm_value v);
  * \return The length of the list. Unless the value is a cyclic structure on the heap, this function will terminate.
  */
 unsigned int lbm_list_length(lbm_value c);
+
+/** Calculate the length of a proper list and evaluate a predicate for each element.
+ * \warning This is a dangerous function that should be used carefully. Cyclic structures on the heap
+ * may lead to the function not terminating.
+ *
+ * \param c A list
+ * \param pres Boolean result of predicate, false if predicate is false for any of the elements in the list, otherwise true.
+ * \param pred Predicate to evaluate for each element of the list.
+ */
+unsigned int lbm_list_length_pred(lbm_value c, bool *pres, bool (*pred)(lbm_value));
 /** Reverse a proper list
  * \warning This is a dangerous function that should be used carefully. Cyclic structures on the heap
  * may lead to the function not terminating.
@@ -467,6 +503,10 @@ void lbm_get_heap_state(lbm_heap_state_t *);
  *
  */
 void lbm_gc_state_inc(void);
+/** Set the freelist to NIL. Means that no memory will be available
+ *  until after a garbage collection.
+ */
+void lbm_nil_freelist(void);
 /** Mark all heap cells that are on the free-list.
  *
  * \return 1 on success or 0 if the free-list is corrupted.
@@ -474,12 +514,12 @@ void lbm_gc_state_inc(void);
 int lbm_gc_mark_freelist(void);
 /** Mark heap cells reachable from the lbm_value v.
  *
- * \param v Root node to start marking from.
+ * \param m Number of Root nodes to start marking from.
+ * \param ... list of root nodes.
  * \return 1 on success and 0 if the stack used internally is full.
  */
-int lbm_gc_mark_phase(lbm_value v);
-int lbm_gc_mark_phase2(lbm_value env);
-
+//int lbm_gc_mark_phase(lbm_value v);
+int lbm_gc_mark_phase(int num, ... );
 /** Performs lbm_gc_mark_phase on all the values of an array.
  *
  * \param data Array of roots to traverse from.
@@ -503,6 +543,15 @@ int lbm_gc_sweep_phase(void);
  * \return 1 for success of 0 for failure.
  */
 int lbm_heap_allocate_array(lbm_value *res, lbm_uint size, lbm_type type);
+/** Convert a C array into an lbm array. If the C array is allocated in LBM MEMORY
+ *  the lifetime of the array will be managed by GC.
+ * \param res lbm_value result pointer for storage of the result array.
+ * \param data C array.
+ * \param type The type tag to assign to the resulting LBM array.
+ * \param num_elt Number of elements in the array.
+ * \return 1 for success and 0 for failure.
+ */
+int lbm_lift_array(lbm_value *value, char *data, lbm_type type, lbm_uint num_elt);
 /** Explicitly free an array.
  *  This function needs to be used with care and knowledge.
  * \param arr Array value.
@@ -718,16 +767,7 @@ static inline bool lbm_is_macro(lbm_value exp) {
 static inline bool lbm_is_match_binder(lbm_value exp) {
   return ((lbm_type_of(exp) == LBM_TYPE_CONS) &&
           (lbm_type_of(lbm_car(exp)) == LBM_TYPE_SYMBOL) &&
-          ((lbm_dec_sym(lbm_car(exp)) == SYM_MATCH_ANY) ||
-           (lbm_dec_sym(lbm_car(exp)) == SYM_MATCH_I) ||
-           (lbm_dec_sym(lbm_car(exp)) == SYM_MATCH_U) ||
-           (lbm_dec_sym(lbm_car(exp)) == SYM_MATCH_I32) ||
-           (lbm_dec_sym(lbm_car(exp)) == SYM_MATCH_U32) ||
-           (lbm_dec_sym(lbm_car(exp)) == SYM_MATCH_FLOAT) ||
-           (lbm_dec_sym(lbm_car(exp)) == SYM_MATCH_I64) ||
-           (lbm_dec_sym(lbm_car(exp)) == SYM_MATCH_U64) ||
-           (lbm_dec_sym(lbm_car(exp)) == SYM_MATCH_DOUBLE) ||
-           (lbm_dec_sym(lbm_car(exp)) == SYM_MATCH_CONS)));
+          ((lbm_dec_sym(lbm_car(exp)) == SYM_MATCH_ANY)));
 }
 
 static inline bool lbm_is_comma_qualified_symbol(lbm_value exp) {
@@ -759,6 +799,14 @@ static inline bool lbm_is_symbol_merror(lbm_value exp) {
 
 static inline bool lbm_is_list(lbm_value x) {
   return (lbm_is_cons(x) || lbm_is_symbol_nil(x));
+}
+
+static inline bool lbm_is_quoted_list(lbm_value x) {
+  return (lbm_is_cons(x) &&
+          lbm_is_symbol(lbm_car(x)) &&
+          (lbm_dec_sym(lbm_car(x)) == SYM_QUOTE) &&
+          lbm_is_cons(lbm_cdr(x)) &&
+          lbm_is_cons(lbm_car(lbm_cdr(x))));
 }
 
 #ifndef LBM64
