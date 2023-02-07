@@ -370,8 +370,8 @@
 #define BMI160_SDA_PIN			15
 #define BMI160_SCL_GPIO			GPIOB
 #define BMI160_SCL_PIN			2
-#define IMU_FLIP
-#define IMU_ROT_180
+#define xIMU_FLIP
+#define xIMU_ROT_180
 
 
 #elif !defined(HW60_IS_MK4) && !defined(HW60_IS_MK5) && !defined(HW60_IS_MK6)
