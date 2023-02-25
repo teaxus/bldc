@@ -31,9 +31,9 @@
 #endif
 
 // HW properties
-#define HW_HAS_3_SHUNTS
-#define HW_HAS_PHASE_SHUNTS
-#define HW_HAS_PHASE_FILTERS
+#define HW_HAS_3_SHUNTS   // HW主板上有三个分流装置，用于安全的电力分配。
+#define HW_HAS_PHASE_SHUNTS // HW主板上有三个阶段分流装置，可以安全地实施多个单元的电源和电源分配。
+#define HW_HAS_PHASE_FILTERS  // HW主板上有三个阶段滤波器，可以有效地稳定电力供应，并减少噪声和抖动。
 
 // Macros
 #ifdef HW75_300_VEDDER_FIRST_PCB

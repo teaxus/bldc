@@ -46,7 +46,9 @@
 #define HW_MINOR				0
 
 // HW properties
+#if !defined(HW60_IS_TS)
 #define HW_HAS_DRV8301
+#endif
 #define HW_HAS_3_SHUNTS
 #define HW_HAS_PHASE_SHUNTS
 #if !defined(HW60_IS_MK3) && !defined(HW60_IS_MK4) && !defined(HW60_IS_MK5) && !defined(HW60_IS_MK6)
@@ -67,8 +69,8 @@
 
 #define LED_GREEN_ON()			palSetPad(GPIOB, 0)
 #define LED_GREEN_OFF()			palClearPad(GPIOB, 0)
-#define LED_RED_ON()			palSetPad(GPIOB, 1)
-#define LED_RED_OFF()			palClearPad(GPIOB, 1)
+#define LED_RED_ON()			palSetPad(GPIOB, 7)
+#define LED_RED_OFF()			palClearPad(GPIOB, 7)
 
 #define CURRENT_FILTER_ON()		palSetPad(GPIOD, 2)
 #define CURRENT_FILTER_OFF()	palClearPad(GPIOD, 2)
@@ -200,13 +202,13 @@
 #define V_REG					3.3
 #endif
 #ifndef VIN_R1
-#define VIN_R1					39000.0
+#define VIN_R1					43000.0
 #endif
 #ifndef VIN_R2
 #define VIN_R2					2200.0
 #endif
 #ifndef CURRENT_AMP_GAIN
-#define CURRENT_AMP_GAIN		20.0
+#define CURRENT_AMP_GAIN		100.0
 #endif
 #ifndef CURRENT_SHUNT_RES
 #ifdef HW60_IS_HP
@@ -341,7 +343,8 @@
 #endif
 
 // SPI for DRV8301
-#if !defined(HW60_IS_MK3) && !defined(HW60_IS_MK4) && !defined(HW60_IS_MK5) && !defined(HW60_IS_MK6)
+#if defined (HW60_IS_TS)
+#elif !defined(HW60_IS_MK3) && !defined(HW60_IS_MK4) && !defined(HW60_IS_MK5) && !defined(HW60_IS_MK6)
 #define DRV8301_MOSI_GPIO		GPIOC
 #define DRV8301_MOSI_PIN		12
 #define DRV8301_MISO_GPIO		GPIOC
